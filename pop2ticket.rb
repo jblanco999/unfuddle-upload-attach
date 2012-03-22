@@ -5,6 +5,7 @@ require 'rubygems'
 require 'net/https'
 require 'net/pop'
 require 'tmail'
+require 'rest-client'
 
 UNFUDDLE_SETTINGS = {
   :subdomain  => 'mysubdomain',
@@ -17,10 +18,51 @@ UNFUDDLE_SETTINGS = {
 POP3_SETTINGS = {
   :server     => 'pop.myserver.com',
   :port       => 110,
-  :username   => 'myusername',
+  :username   => 'jblanco999',
   :password   => 'mypassword',
   :delete     => false
 }
+
+def receive(email)
+    #email.attachments are TMail::Attachment
+    #but they ignore a text/mail parts.
+    @attachments = ''
+
+    email.parts.each_with_index do |part, index|
+      filename = part_filename(part)
+      filename ||= "#{index}.#{ext(part)}"
+      filename = "#{Time.now.strftime("%Y%m%d%H%M%S")}-" + filename
+      filepath = "./attachements/#{filename}"
+      @attachments = @attachments + "|" + filename
+      puts "WRITING: #{filepath}"
+      #File.open( fn, "w+b", 0644 ) { |f| f.write tattch.body.decoded }
+      File.open(filepath,File::CREAT|File::TRUNC|File::WRONLY,0644) do |f|
+        f.write(part.body).decoded
+      end
+    end
+
+    return @attachments
+end
+
+  # part is a TMail::Mail
+def part_filename(part)
+    # This is how TMail::Attachment gets a filename
+    file_name = (part['content-location'] &&
+      part['content-location'].body) ||
+      part.sub_header("content-type", "name") ||
+      part.sub_header("content-disposition", "filename")
+end
+
+    CTYPE_TO_EXT = {
+      'image/jpeg' => 'jpg',
+      'image/gif'  => 'gif',
+      'image/png'  => 'png',
+      'image/tiff' => 'tif'
+    }
+
+def ext( mail )
+        CTYPE_TO_EXT[mail.content_type] || 'txt'
+end
 
 def xml_escape(s); s.gsub('&', '&amp;').gsub('<','&lt;').gsub('>', '&gt;'); end
 
@@ -44,7 +86,15 @@ Net::POP3.start(POP3_SETTINGS[:server], POP3_SETTINGS[:port], POP3_SETTINGS[:use
     response = http.request(request)
     if response.code == "201"
       puts "Message Created: #{response['Location']}"
-      message.delete if POP3_SETTINGS[:delete]
+      attachments = receive(email)
+      attachments do |filename|
+#        RestClient.post '/data', :myfile => File.new("/path/to/image.jpg", 'rb')
+#        private_resource = RestClient::Resource.new 'https://example.com/private/resource', 'user', 'pass'
+#        private_resource.put File.read('pic.jpg'), :content_type => 'image/jpg'
+        upload = Net::HTTP::Post.new("#{response['Location']}/attachments/upload", {'Content-type' => 'application/octet-stream'}, {'Accept' => 'application/xml'})
+        upload.basic_auth UNFUDDLE_SETTINGS[:username], UNFUDDLE_SETTINGS[:password]
+      end
+        message.delete if POP3_SETTINGS[:delete]
    else
     # hmmm...we must have done something wrong
       puts "HTTP Status Code: #{response.code}."
